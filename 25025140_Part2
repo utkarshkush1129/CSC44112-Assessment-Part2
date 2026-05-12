@@ -1,0 +1,290 @@
+"""
+=============================================================================
+CSC-44112 Part 2 – AI Model Development
+Iris Species Classification using Random Forest
+=============================================================================
+STRUCTURE:
+  Section 1  – Abstract
+  Section 2  – Introduction and Problem Definition
+  Section 3  – Exploratory Data Analysis (EDA)
+  Section 4  – Methodology
+  Section 5  – Results and Evaluation
+  Section 6  – Discussion and Real-World Impact
+  Section 7  – Conclusion and Future Work
+  Section 8  – References and Appendices
+=============================================================================
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IMPORTS
+# ─────────────────────────────────────────────────────────────────────────────
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+import os
+warnings.filterwarnings('ignore')
+
+# ── Automatically create figures folder ──────────────────────────────────────
+os.makedirs('figures', exist_ok=True)
+print("✓ figures folder ready")
+
+from sklearn.datasets import load_iris
+from sklearn.model_selection import (train_test_split, cross_val_score,
+                                     GridSearchCV, learning_curve)
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import (classification_report, confusion_matrix,
+                              accuracy_score)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 3 – EXPLORATORY DATA ANALYSIS (EDA)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- 3.1 Load Dataset --------------------------------------------------------
+iris = load_iris()
+df = pd.DataFrame(iris.data, columns=iris.feature_names)
+df['species'] = pd.Categorical.from_codes(iris.target, iris.target_names)
+
+print("=== Dataset Shape ===")
+print(df.shape)                          # (150, 5)
+
+print("\n=== Data Types ===")
+print(df.dtypes)
+
+# --- 3.2 Missing Value Analysis ----------------------------------------------
+print("\n=== Missing Values ===")
+print(df.isnull().sum())                 # All zeros — no missing data
+
+# --- 3.3 Descriptive Statistics ----------------------------------------------
+print("\n=== Descriptive Statistics ===")
+print(df.describe())
+
+print("\n=== Class Distribution ===")
+print(df['species'].value_counts())      # Perfectly balanced: 50 per class
+
+# --- 3.4 Feature Distribution Plots -----------------------------------------
+colors = {'setosa': '#E74C3C', 'versicolor': '#2ECC71', 'virginica': '#3498DB'}
+features = iris.feature_names
+
+fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+fig.suptitle('Feature Distributions by Species', fontsize=16, fontweight='bold')
+for i, (ax, feat) in enumerate(zip(axes.flat, features)):
+    for sp, col in colors.items():
+        subset = df[df['species'] == sp][feat]
+        ax.hist(subset, alpha=0.6, color=col, label=sp, bins=15, edgecolor='white')
+    ax.set_title(feat, fontsize=11)
+    ax.set_xlabel('cm')
+    ax.set_ylabel('Count')
+    if i == 0:
+        ax.legend()
+plt.tight_layout()
+plt.savefig('figures/fig1_distributions.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- 3.5 Pairwise Scatter Matrix ---------------------------------------------
+fig2, axes2 = plt.subplots(4, 4, figsize=(14, 12))
+fig2.suptitle('Pairwise Feature Scatter Matrix', fontsize=15, fontweight='bold')
+for i, fi in enumerate(features):
+    for j, fj in enumerate(features):
+        ax = axes2[i][j]
+        if i == j:
+            for sp, col in colors.items():
+                ax.hist(df[df['species'] == sp][fi], alpha=0.6, color=col, bins=12)
+        else:
+            for sp, col in colors.items():
+                sub = df[df['species'] == sp]
+                ax.scatter(sub[fj], sub[fi], alpha=0.6, color=col, s=15, label=sp)
+        if i == 3:
+            ax.set_xlabel(fj.replace(' (cm)', ''), fontsize=7)
+        if j == 0:
+            ax.set_ylabel(fi.replace(' (cm)', ''), fontsize=7)
+        ax.tick_params(labelsize=6)
+handles = [plt.Line2D([0],[0], marker='o', color='w', markerfacecolor=c,
+                      markersize=8, label=s) for s, c in colors.items()]
+fig2.legend(handles=handles, loc='upper right', fontsize=10)
+plt.tight_layout()
+plt.savefig('figures/fig2_pairplot.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- 3.6 Correlation Heatmap -------------------------------------------------
+fig3, ax3 = plt.subplots(figsize=(7, 6))
+corr = df[features].corr()
+sns.heatmap(corr, annot=True, fmt='.2f', cmap='RdYlGn', ax=ax3,
+            linewidths=0.5, vmin=-1, vmax=1,
+            xticklabels=[f.replace(' (cm)','') for f in features],
+            yticklabels=[f.replace(' (cm)','') for f in features])
+ax3.set_title('Feature Correlation Matrix', fontsize=13, fontweight='bold')
+plt.tight_layout()
+plt.savefig('figures/fig3_correlation.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- 3.7 Box Plots by Species ------------------------------------------------
+fig4, axes4 = plt.subplots(1, 4, figsize=(14, 5))
+fig4.suptitle('Feature Box Plots by Species', fontsize=14, fontweight='bold')
+for ax, feat in zip(axes4, features):
+    data = [df[df['species'] == sp][feat].values for sp in iris.target_names]
+    bp = ax.boxplot(data, patch_artist=True, labels=iris.target_names)
+    for patch, col in zip(bp['boxes'], colors.values()):
+        patch.set_facecolor(col)
+        patch.set_alpha(0.7)
+    ax.set_title(feat.replace(' (cm)', ''), fontsize=10)
+    ax.set_ylabel('cm')
+    ax.tick_params(axis='x', rotation=15)
+plt.tight_layout()
+plt.savefig('figures/fig4_boxplots.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4 – METHODOLOGY
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- 4.1 Data Preprocessing --------------------------------------------------
+X = iris.data
+y = iris.target
+
+# Stratified 80/20 split — preserves class balance
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y)
+
+# Standardise features (zero mean, unit variance)
+scaler = StandardScaler()
+X_train_sc = scaler.fit_transform(X_train)
+X_test_sc  = scaler.transform(X_test)      # fit on train only — prevents leakage
+
+print(f"Train set: {X_train_sc.shape}")
+print(f"Test set:  {X_test_sc.shape}")
+
+# --- 4.2 Model Selection – Baseline Comparison --------------------------------
+models = {
+    'Logistic Regression':     LogisticRegression(max_iter=200),
+    'K-Nearest Neighbours':    KNeighborsClassifier(),
+    'Support Vector Machine':  SVC(probability=True),
+    'Random Forest':           RandomForestClassifier(n_estimators=100, random_state=42)
+}
+
+print("\n=== 5-Fold Cross-Validation Results ===")
+results = {}
+for name, model in models.items():
+    cv_scores = cross_val_score(model, X_train_sc, y_train, cv=5, scoring='accuracy')
+    results[name] = {'mean': cv_scores.mean(), 'std': cv_scores.std()}
+    print(f"{name:30s}  {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+
+# Model comparison bar chart
+fig5, ax5 = plt.subplots(figsize=(9, 5))
+names = list(results.keys())
+means = [results[n]['mean'] for n in names]
+stds  = [results[n]['std']  for n in names]
+bars = ax5.barh(names, means, xerr=stds,
+                color=['#3498DB','#2ECC71','#E74C3C','#9B59B6'],
+                height=0.5, capsize=4, alpha=0.85)
+ax5.set_xlim(0.85, 1.01)
+ax5.set_xlabel('5-Fold CV Accuracy', fontsize=11)
+ax5.set_title('Model Comparison – Cross-Validated Accuracy', fontsize=13, fontweight='bold')
+for bar, mean in zip(bars, means):
+    ax5.text(mean + 0.001, bar.get_y() + bar.get_height()/2,
+             f'{mean:.4f}', va='center', fontsize=10)
+plt.tight_layout()
+plt.savefig('figures/fig5_model_comparison.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- 4.3 Hyperparameter Tuning (Random Forest) --------------------------------
+# Random Forest selected for its robustness and interpretability (feature importance)
+param_grid = {
+    'n_estimators':     [50, 100, 200],
+    'max_depth':        [None, 3, 5],
+    'min_samples_split':[2, 5]
+}
+gs = GridSearchCV(
+    RandomForestClassifier(random_state=42),
+    param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+gs.fit(X_train_sc, y_train)
+
+print("\n=== GridSearchCV Best Parameters ===")
+print(gs.best_params_)
+print(f"Best CV Score: {gs.best_score_:.4f}")
+
+best_rf = gs.best_estimator_
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5 – RESULTS AND EVALUATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- 5.1 Test Set Performance ------------------------------------------------
+y_pred   = best_rf.predict(X_test_sc)
+test_acc = accuracy_score(y_test, y_pred)
+
+print(f"\n=== Test Set Accuracy: {test_acc:.4f} ===")
+print("\n=== Classification Report ===")
+print(classification_report(y_test, y_pred, target_names=iris.target_names))
+
+# --- 5.2 Confusion Matrix ----------------------------------------------------
+fig6, ax6 = plt.subplots(figsize=(6, 5))
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax6,
+            xticklabels=iris.target_names,
+            yticklabels=iris.target_names,
+            linewidths=0.5)
+ax6.set_title(f'Confusion Matrix – Tuned Random Forest\n(Test Accuracy: {test_acc:.4f})',
+              fontsize=12, fontweight='bold')
+ax6.set_xlabel('Predicted Label')
+ax6.set_ylabel('True Label')
+plt.tight_layout()
+plt.savefig('figures/fig6_confusion_matrix.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- 5.3 Learning Curve ------------------------------------------------------
+train_sizes, train_scores, val_scores = learning_curve(
+    best_rf, X_train_sc, y_train, cv=5,
+    train_sizes=np.linspace(0.1, 1.0, 8), scoring='accuracy')
+
+fig7, ax7 = plt.subplots(figsize=(8, 5))
+ax7.plot(train_sizes, train_scores.mean(axis=1), 'o-', color='#E74C3C', label='Training Score')
+ax7.fill_between(train_sizes,
+                  train_scores.mean(1) - train_scores.std(1),
+                  train_scores.mean(1) + train_scores.std(1),
+                  alpha=0.15, color='#E74C3C')
+ax7.plot(train_sizes, val_scores.mean(axis=1), 'o-', color='#3498DB', label='Validation Score')
+ax7.fill_between(train_sizes,
+                  val_scores.mean(1) - val_scores.std(1),
+                  val_scores.mean(1) + val_scores.std(1),
+                  alpha=0.15, color='#3498DB')
+ax7.set_title('Learning Curve – Tuned Random Forest Classifier', fontsize=13, fontweight='bold')
+ax7.set_xlabel('Training Set Size')
+ax7.set_ylabel('Accuracy')
+ax7.legend()
+ax7.set_ylim(0.7, 1.05)
+ax7.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig('figures/fig7_learning_curve.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# --- 5.4 Feature Importance --------------------------------------------------
+fi = best_rf.feature_importances_
+feat_names = [f.replace(' (cm)', '') for f in iris.feature_names]
+sorted_idx = np.argsort(fi)
+
+fig8, ax8 = plt.subplots(figsize=(7, 4))
+bars8 = ax8.barh(
+    [feat_names[i] for i in sorted_idx], fi[sorted_idx],
+    color=['#3498DB','#2ECC71','#E74C3C','#9B59B6'], alpha=0.85)
+ax8.set_title('Feature Importances – Random Forest', fontsize=13, fontweight='bold')
+ax8.set_xlabel('Gini Importance')
+for bar, val in zip(bars8, fi[sorted_idx]):
+    ax8.text(val + 0.005, bar.get_y() + bar.get_height()/2,
+             f'{val:.4f}', va='center', fontsize=10)
+plt.tight_layout()
+plt.savefig('figures/fig8_feature_importance.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+print("\n=== Feature Importances ===")
+for name, importance in sorted(zip(feat_names, fi), key=lambda x: -x[1]):
+    print(f"  {name:25s}  {importance:.4f}")
+
+print("\n=== PIPELINE COMPLETE ===")
+print(f"Final Test Accuracy : {test_acc:.4f}")
+print(f"Best Parameters     : {gs.best_params_}")
